@@ -13,7 +13,7 @@ function App() {
   const [statusMessage, setStatusMessage] = useState('');
   const [dbStatus, setDbStatus] = useState('unknown');
 
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
   const fetchData = async () => {
     try {
@@ -34,6 +34,7 @@ function App() {
     }
   };
 
+  //connect to user db
   const connect = async () => {
     setStatusMessage('Connecting...');
     try {
@@ -47,6 +48,7 @@ function App() {
     }
   };
 
+  //connect to demo db
   const connectDemo = async () => {
     setStatusMessage('Connecting to demo DB...');
     try {

@@ -1,14 +1,9 @@
 //.env config
 require('dotenv').config();
 const express = require('express');
-
-const {
-  createPostgresClient,
-} = require("./db/postgres");
-
 const app = express();
 
-//cors
+//cors to connect to frontend
 const cors = require('cors');
 const corsOptions = {
   origin: ['http://localhost:5173'], 
@@ -19,122 +14,24 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Create pool ONCE at startup
+const PORT = process.env.VITE_PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+app.get("/api", (req, res) => {
+  res.json({ message: "Hello from the server!" });
+});
+
+//POSTGRES CONNECTION SETUP
+
 let dbPool;
 let dbAvailable = false;
-try {
-  dbPool = createPostgresClient({
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
-} catch (err) {
-  console.error("❌ Failed to create Postgres client", err);
-  dbPool = null;
-  dbAvailable = false;
-}
 
-// Optional: test connection on startup, but do NOT exit if it fails
-let retryInterval = null;
-
-async function testAndSetDb(config) {
-  if (!config) return { ok: false, error: 'No config provided' };
-
-  const candidatePool = createPostgresClient(config);
-  try {
-    // Try a lightweight query to validate the credentials
-    await candidatePool.query("SELECT 1");
-
-    // Close old pool if it exists
-    if (dbPool && dbPool !== candidatePool) {
-      try { await dbPool.end(); } catch (e) { /* ignore */ }
-    }
-
-    dbPool = candidatePool;
-    dbAvailable = true;
-    console.log("✅ Connected to Postgres");
-
-    if (retryInterval) {
-      clearInterval(retryInterval);
-      retryInterval = null;
-    }
-
-    return { ok: true };
-  } catch (err) {
-    // Candidate failed — clean up and return false with reason
-    try { await candidatePool.end(); } catch (e) { /* ignore */ }
-    console.error('testAndSetDb error:', err.message);
-    return { ok: false, error: err.message };
-  }
-}
-
-function startRetryLoop() {
-  if (retryInterval) return;
-  retryInterval = setInterval(async () => {
-    const cfg = {
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      ssl: process.env.DB_SSL === 'true' || false,
-    };
-
-    const result = await testAndSetDb(cfg);
-    if (result.ok) {
-      console.log("✅ Reconnected to Postgres via retry loop");
-    } else {
-      // optionally log a short message but don't spam
-      // console.debug('Retry failed:', result.error);
-    }
-  }, 30000);
-}
-
-(async () => {
-  // Try initial connection if there was a pool config
-  if (dbPool) {
-    const initialCfg = {
-      host: process.env.DB_HOST,
-      port: process.env.DB_PORT,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      ssl: process.env.DB_SSL === 'true' || false,
-    };
-
-    const result = await testAndSetDb(initialCfg);
-    if (!result.ok) {
-      dbAvailable = false;
-      console.warn("⚠️ Continuing without DB connection. Server will still serve frontend, but DB routes will return 503.");
-      console.warn('Initial DB connect error:', result.error);
-      startRetryLoop();
-    }
-  } else {
-    console.warn("⚠️ No Postgres client available. Server will continue without DB.");
-    startRetryLoop();
-  }
-})();
-
-// -- New endpoints: POST /db/connect and /db/connect-demo and GET /db/status
-app.post('/db/connect', async (req, res) => {
-  const { host, port, user, password, database, ssl } = req.body;
-  const cfg = { host, port, user, password, database, ssl };
-
-  try {
-    const result = await testAndSetDb(cfg);
-    if (result.ok) {
-      console.log('DB connected via /db/connect (user:', user, 'db:', database, ')');
-      return res.json({ message: 'Connected' });
-    }
-
-    console.warn('Failed /db/connect attempt:', result.error);
-    return res.status(500).json({ error: 'Failed to connect with provided credentials', details: result.error });
-  } catch (err) {
-    return res.status(500).json({ error: 'Error while trying to connect to DB' });
-  }
-});
+//import Postgres client functions
+const {
+  createPostgresClient,
+} = require("./db/postgres");
 
 app.post('/db/connect-demo', async (req, res) => {
   const demoCfg = {
@@ -146,6 +43,7 @@ app.post('/db/connect-demo', async (req, res) => {
     ssl: process.env.DEMO_DB_SSL === 'true' || false,
   };
 
+  // Validate demo config exists
   if (!demoCfg.host || !demoCfg.user || !demoCfg.database) {
     return res.status(400).json({ error: 'Demo DB credentials are not configured on the server' });
   }
@@ -154,22 +52,66 @@ app.post('/db/connect-demo', async (req, res) => {
 
   const result = await testAndSetDb(demoCfg);
   if (result.ok) {
-    console.log('Demo DB connected via /db/connect-demo');
     return res.json({ message: 'Connected to demo DB' });
   }
 
-  console.warn('Demo connect failed:', result.error);
   return res.status(500).json({ error: 'Failed to connect to demo DB', details: result.error });
 });
 
-app.get('/db/status', (req, res) => {
-  res.json({ available: !!dbAvailable });
+app.post('/db/connect', async (req, res) => {
+  const { host, port, user, password, database, ssl } = req.body;
+  const cfg = { host, port, user, password, database, ssl };
+
+  // basic validation
+  if (!cfg.host || !cfg.user || !cfg.database) {
+    return res.status(400).json({ error: 'Host, user and database are required' });
+  }
+
+  const result = await testAndSetDb(cfg);
+  if (result.ok) {
+    return res.json({ message: 'Connected' });
+  }
+
+  return res.status(500).json({ error: 'Failed to connect with provided credentials', details: result.error });
 });
 
-const PORT = process.env.VITE_PORT || 5000;
+async function testAndSetDb(config) {
+  if (!config) return { ok: false, error: 'No config provided' };
 
-app.get("/api", (req, res) => {
-  res.json({ message: "Hello from the server!" });
+  if (!config.host || !config.user || !config.database) {
+    return { ok: false, error: 'Host, user and database are required' };
+  }
+
+  if (config.password !== undefined && typeof config.password !== 'string') {
+    return { ok: false, error: 'DB password must be a string' };
+  }
+
+  let candidatePool;
+  try {
+    candidatePool = createPostgresClient(config);
+    // validate connection
+    await candidatePool.query('SELECT 1');
+
+    // close previous pool if exists
+    if (dbPool && dbPool !== candidatePool) {
+      try { await dbPool.end(); } catch (e) { /* ignore */ }
+    }
+
+    dbPool = candidatePool;
+    dbAvailable = true;
+
+    console.log('✅ Connected to Postgres (user:', config.user, 'db:', config.database, ')');
+
+    return { ok: true };
+  } catch (err) {
+    try { if (candidatePool) await candidatePool.end(); } catch (e) { /* ignore */ }
+    console.error('testAndSetDb error:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+app.get('/db/status', (req, res) => {
+  res.json({ available: !!dbAvailable });
 });
 
 app.get("/health/db", async (req, res) => {
@@ -203,6 +145,4 @@ app.get("/db/schema", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+
