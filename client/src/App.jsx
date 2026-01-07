@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import axios from 'axios'
 import postgresLogo from '/icons8-postgres.svg';
+import DbExplorer from './DbExplorer.jsx';
 
 function App() {
   const [data, setData] = useState({ message: 'Loading...' });
@@ -12,6 +13,8 @@ function App() {
   const [database, setDatabase] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [dbStatus, setDbStatus] = useState('unknown');
+  const [showExplorer, setShowExplorer] = useState(false);
+  const [schema, setSchema] = useState([]);
 
   const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -28,9 +31,12 @@ function App() {
   const checkDbStatus = async () => {
     try {
       const res = await axios.get(`${API_BASE}/db/status`);
-      setDbStatus(res.data.available ? 'available' : 'unavailable');
+      const available = !!res.data.available;
+      setDbStatus(available ? 'available' : 'unavailable');
+      return available;
     } catch (err) {
       setDbStatus('unavailable');
+      return false;
     }
   };
 
@@ -40,11 +46,30 @@ function App() {
     try {
       const res = await axios.post(`${API_BASE}/db/connect`, { host, port, user, password, database });
       setStatusMessage(res.data.message || 'Connected');
-      await checkDbStatus();
+      const available = await checkDbStatus();
+      if (available) {
+        await fetchSchema();
+        setShowExplorer(true);
+      }
     } catch (err) {
       const error = err.response?.data;
       setStatusMessage((error?.error ? `${error.error}${error.details ? `: ${error.details}` : ''}` : 'Failed to connect'));
       await checkDbStatus();
+    }
+  };
+
+  // load schema (all table names)
+  const fetchSchema = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/db/schema`);
+      // server returns rows with table_name, column_name, data_type
+      const tables = Array.isArray(res.data) ? [...new Set(res.data.map(r => r.table_name))] : [];
+      setSchema(tables);
+      return tables;
+    } catch (err) {
+      console.error('Failed to fetch schema', err);
+      setStatusMessage('Failed to load schema');
+      return [];
     }
   };
 
@@ -54,7 +79,11 @@ function App() {
     try {
       const res = await axios.post(`${API_BASE}/db/connect-demo`);
       setStatusMessage(res.data.message || 'Connected to demo');
-      await checkDbStatus();
+      const available = await checkDbStatus();
+      if (available) {
+        await fetchSchema();
+        setShowExplorer(true);
+      }
     } catch (err) {
       const error = err.response?.data;
       setStatusMessage((error?.error ? `${error.error}${error.details ? `: ${error.details}` : ''}` : 'Failed to connect to demo DB'));
@@ -62,10 +91,27 @@ function App() {
     }
   };
 
+  // const connected = async () => {
+  //   const available = await checkDbStatus();
+  //   if (available) {
+  //     await fetchSchema();
+  //     setShowExplorer(true);
+  // };
+
   useEffect(() => {
     fetchData();
-    checkDbStatus();
+    (async () => {
+      const available = await checkDbStatus();
+      if (available) {
+        await fetchSchema();
+        setShowExplorer(true);
+      }
+    })();
   }, []);
+
+  if (showExplorer) {
+    return <DbExplorer tables={schema} onBack={() => setShowExplorer(false)} />;
+  }
 
   return (
     <>
