@@ -61,12 +61,21 @@ function App() {
     }
   };
 
-  // load schema (all table names)
+  // load schema (table names + column counts)
   const fetchSchema = async () => {
     try {
       const res = await axios.get(`${API_BASE}/db/schema`);
       // server returns rows with table_name, column_name, data_type
-      const tables = Array.isArray(res.data) ? [...new Set(res.data.map(r => r.table_name))] : [];
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const tableCounts = rows.reduce((acc, row) => {
+        const name = typeof row === 'string' ? row : row.table_name;
+        if (!name) return acc;
+        acc[name] = (acc[name] || 0) + (row.column_name ? 1 : 0);
+        return acc;
+      }, {});
+      const tables = Object.entries(tableCounts)
+        .map(([name, columnCount]) => ({ name, columnCount }))
+        .sort((a, b) => a.name.localeCompare(b.name));
       setSchema(tables);
       return tables;
     } catch (err) {
