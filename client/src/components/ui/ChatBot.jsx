@@ -1,12 +1,21 @@
-import { FaArrowUp } from 'react-icons/fa';
+import axios from 'axios';
+import { useRef } from 'react';
 import { useForm } from 'react-hook-form';
+import { FaArrowUp } from 'react-icons/fa';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const ChatBot = () => {
+  const conversationId = useRef(crypto.randomUUID());
   const { register, handleSubmit, reset, formState } = useForm();
 
-  const onSubmit = (data) => {
-    console.log(data);
+  const onSubmit = async ({ prompt }) => {
     reset();
+    const { data } = await axios.post(`${API_BASE}/api/chat`, {
+      prompt,
+      conversationId: conversationId.current,
+    });
+    console.log(data);
   };
 
   const onKeyDown = (e) => {
